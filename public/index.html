@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cf_ai_werewolf — Werewolf with AI Villagers</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="lobby" class="screen">
+      <header class="lobby-header">
+        <h1>cf_ai_werewolf</h1>
+        <p class="tagline">Survive the night with six AI villagers — two of them want you dead.</p>
+      </header>
+      <form id="lobby-form" autocomplete="off">
+        <label for="name-input">Your name</label>
+        <input id="name-input" type="text" maxlength="40" placeholder="e.g. Tester" required>
+        <button id="start-btn" type="submit">Start game</button>
+      </form>
+      <div id="lobby-error" class="error" hidden></div>
+    </div>
+
+    <div id="game" class="screen" hidden>
+      <header id="game-header">
+        <div id="phase-indicator">
+          <span id="phase-icon">🌙</span>
+          <span id="phase-name">Night</span>
+          <span id="turn-indicator"></span>
+        </div>
+        <div id="role-card">
+          <span id="role-emoji">❓</span>
+          <span id="role-name">…</span>
+        </div>
+        <div id="alive-counter" title="Living players">7/7 alive</div>
+      </header>
+
+      <main id="game-main">
+        <section id="players-panel">
+          <h2>Players</h2>
+          <ul id="players-list"></ul>
+          <div id="known-wolves" hidden>
+            <h3>Your pack 🐺</h3>
+            <ul id="known-wolves-list"></ul>
+          </div>
+          <div id="seer-knowledge" hidden>
+            <h3>Visions 🔮</h3>
+            <ul id="seer-knowledge-list"></ul>
+          </div>
+        </section>
+
+        <section id="log-panel">
+          <div id="log-stream"></div>
+        </section>
+
+        <section id="action-panel">
+          <div id="action-content">Waiting…</div>
+        </section>
+      </main>
+    </div>
+
+    <div id="game-over" class="screen" hidden>
+      <h1 id="winner-banner">Game over</h1>
+      <ul id="reveal-list"></ul>
+      <button id="play-again-btn">Play another game</button>
+    </div>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

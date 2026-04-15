@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cf-ai-werewolf",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "NIGHT_HUMAN_TIMEOUT": "2 minute",
+    "DAY_HUMAN_TIMEOUT": "60 second",
+    "VOTE_HUMAN_TIMEOUT": "2 minute"
+  },
+  "ai": { "binding": "AI" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "GAME_DO", "class_name": "GameDurableObject" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameDurableObject"] }
+  ],
+  "workflows": [
+    {
+      "name": "werewolf-game-workflow",
+      "binding": "GAME_WORKFLOW",
+      "class_name": "GameWorkflow"
+    }
+  ],
+  "assets": {
+    "directory": "./public/",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true }
+}
