@@ -61,13 +61,20 @@ describe("frontend asset serving", () => {
 });
 
 describe("design system (CSS + HTML)", () => {
-  it("Google Fonts are preconnected and loaded", async () => {
+  it("pixel fonts are preconnected and loaded (Press Start 2P + Pixelify Sans)", async () => {
     const res = await SELF.fetch("https://app/");
     const body = await res.text();
     expect(body).toContain('rel="preconnect"');
     expect(body).toContain("fonts.gstatic.com");
-    expect(body.toLowerCase()).toContain("cinzel");
-    expect(body.toLowerCase()).toContain("inter");
+    expect(body).toContain("Press+Start+2P");
+    expect(body).toContain("Pixelify+Sans");
+  });
+
+  it("old Cinzel/Inter fonts are dropped from <head>", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    expect(body).not.toContain("Cinzel");
+    expect(body).not.toMatch(/family=Inter/);
   });
 
   it("styles.css has phase-aware tokens (night + day-debate + voting)", async () => {
@@ -127,6 +134,115 @@ describe("design system (CSS + HTML)", () => {
     const res = await SELF.fetch("https://app/");
     const body = await res.text();
     expect(body).toMatch(/<body[^>]*class="[^"]*phase-\w+/);
+  });
+});
+
+describe("pixel-art aesthetic", () => {
+  // Common emoji ranges that should NOT appear in initial markup
+  const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
+
+  it("index.html initial markup contains no emoji glyphs", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    expect(body).not.toMatch(EMOJI_RE);
+  });
+
+  it("app.js source contains no emoji glyphs", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).not.toMatch(EMOJI_RE);
+  });
+
+  it("sprites.js is served as a JS module with exports", async () => {
+    const res = await SELF.fetch("https://app/sprites.js");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("export");
+    expect(body).toContain("renderSprite");
+  });
+
+  it("app.js imports the sprites module", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).toMatch(/from\s+["']\.\/sprites\.js["']/);
+  });
+
+  it("app.js references ROLE_SPRITES, PERSONA_SPRITES, PHASE_SPRITES", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).toContain("ROLE_SPRITES");
+    expect(body).toContain("PERSONA_SPRITES");
+    expect(body).toContain("PHASE_SPRITES");
+  });
+
+  it("app.js no longer exports/uses PERSONA_EMOJI map", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).not.toContain("PERSONA_EMOJI");
+  });
+
+  it("starfield element is in DOM", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    expect(body).toContain('id="starfield"');
+  });
+
+  it("phase-icon and role-emoji spans are empty (no emoji)", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    expect(body).toMatch(/<span id="phase-icon"[^>]*>\s*<\/span>/);
+    expect(body).toMatch(/<span class="role-card-emoji" id="role-emoji"[^>]*>\s*<\/span>/);
+  });
+
+  it("styles.css has zero non-zero border-radius declarations", async () => {
+    const res = await SELF.fetch("https://app/styles.css");
+    const body = await res.text();
+    // Match border-radius: <number><non-zero unit/digit>
+    const matches = body.match(/border-radius:\s*[1-9]/g) ?? [];
+    expect(matches.length).toBe(0);
+  });
+
+  it("styles.css has no backdrop-filter declarations", async () => {
+    const res = await SELF.fetch("https://app/styles.css");
+    const body = await res.text();
+    expect(body).not.toContain("backdrop-filter");
+  });
+
+  it("styles.css uses hard offset shadows (no blur)", async () => {
+    const res = await SELF.fetch("https://app/styles.css");
+    const body = await res.text();
+    // At least one box-shadow with the form: <px> <px> 0 <color>
+    expect(body).toMatch(/box-shadow:\s*[\d-]+px\s+[\d-]+px\s+0\s/);
+  });
+
+  it("styles.css uses steps() timing functions in animations/transitions", async () => {
+    const res = await SELF.fetch("https://app/styles.css");
+    const body = await res.text();
+    const matches = body.match(/steps\s*\(/g) ?? [];
+    expect(matches.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("role card uses clip-path polygon for notched corners", async () => {
+    const res = await SELF.fetch("https://app/styles.css");
+    const body = await res.text();
+    expect(body).toContain("clip-path: polygon(");
+  });
+
+  it("appendLogEntry uses sprite markers (SKULL/BALLOT/CHEVRON/BUBBLE)", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).toContain("SKULL_TINY");
+    expect(body).toContain("BALLOT_TINY");
+    expect(body).toContain("CHEVRON_TINY");
+    expect(body).toContain("BUBBLE_TINY");
+  });
+
+  it("avatar function uses persona sprites instead of initials letter", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).toContain("avatar-sprite");
+    // Old version used `${initial}` directly in avatar — no longer present
+    expect(body).not.toMatch(/\.charAt\(0\)\.toUpperCase\(\)/);
   });
 });
 

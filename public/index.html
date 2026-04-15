@@ -6,20 +6,21 @@
   <title>cf_ai_werewolf — Werewolf with AI Villagers</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="phase-lobby">
+  <div id="starfield" aria-hidden="true"></div>
   <div id="app">
     <div id="lobby" class="screen">
-      <div class="moon"></div>
+      <div class="lobby-moon" id="lobby-moon" aria-hidden="true"></div>
       <header class="lobby-header">
         <h1>cf<span class="underscore">_</span>ai<span class="underscore">_</span>werewolf</h1>
         <p class="tagline">Seven gather by the fire. Two are not what they seem.</p>
       </header>
       <form id="lobby-form" autocomplete="off">
         <label for="name-input">Your name</label>
-        <input id="name-input" type="text" maxlength="40" placeholder="Traveler" required autocomplete="off" spellcheck="false" autocapitalize="none">
+        <input id="name-input" type="text" maxlength="40" placeholder="TRAVELER" required autocomplete="off" spellcheck="false" autocapitalize="none">
         <button id="start-btn" type="submit">
           <span class="btn-label">Enter the village</span>
           <span class="spinner" hidden aria-hidden="true"></span>
@@ -31,7 +32,7 @@
     <div id="game" class="screen" hidden>
       <header id="game-header">
         <div id="phase-indicator">
-          <span id="phase-icon" aria-hidden="true">🌙</span>
+          <span id="phase-icon" aria-hidden="true"></span>
           <span id="phase-name">Night</span>
           <span id="turn-indicator"></span>
         </div>
@@ -42,7 +43,7 @@
         <div class="role-card-inner">
           <div class="role-card-front">
             <div class="role-card-border">
-              <span class="role-card-emoji" id="role-emoji" aria-hidden="true">❓</span>
+              <span class="role-card-emoji" id="role-emoji" aria-hidden="true"></span>
               <span class="role-card-title" id="role-name">…</span>
               <span class="role-card-flavor" id="role-flavor"></span>
             </div>

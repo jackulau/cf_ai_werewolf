@@ -1,55 +1,61 @@
-// cf_ai_werewolf — single-page chat UI driven by WebSocket.
+// cf_ai_werewolf — pixel-art chat UI driven by WebSocket.
+import {
+  renderSprite,
+  starfield,
+  ROLE_SPRITES,
+  PERSONA_SPRITES,
+  PHASE_SPRITES,
+  TRAVELER,
+  MOON,
+  WEREWOLF,
+  SEER,
+  DOCTOR,
+  SKULL_TINY,
+  BALLOT_TINY,
+  CHEVRON_TINY,
+  BUBBLE_TINY,
+  ZZZ_TINY,
+  STAR_TINY,
+} from "./sprites.js";
+
 const $ = (id) => document.getElementById(id);
 
 const STALL_THRESHOLD_MS = 10_000;
 
 const ROLE_INFO = {
   villager: {
-    emoji: "🌾",
+    spriteId: "villager",
     name: "Villager",
-    flavor: "A plain soul.",
+    flavor: "A plain soul",
     desc: "You have no abilities. Watch the others closely — the truth is in what they say, and what they fail to say. At the vote, be ready to name a wolf.",
   },
   seer: {
-    emoji: "🔮",
+    spriteId: "seer",
     name: "Seer",
-    flavor: "One who sees.",
+    flavor: "One who sees",
     desc: "Each night you may investigate a single player and learn whether they are a werewolf. Share your findings at your own risk — speak up and the wolves will come for you next.",
   },
   doctor: {
-    emoji: "🕯️",
+    spriteId: "doctor",
     name: "Doctor",
-    flavor: "A quiet healer.",
+    flavor: "A quiet healer",
     desc: "Each night, choose one soul to protect. If the wolves attack them, they live. You may protect yourself — but never two nights in a row. Keep your role hidden.",
   },
   werewolf: {
-    emoji: "🐺",
+    spriteId: "werewolf",
     name: "Werewolf",
-    flavor: "Hunger in the dark.",
+    flavor: "Hunger in the dark",
     desc: "You and your pack stalk the village by night. Each night choose a victim together. By day, lie. Deflect. Accuse the innocent. The village wins at dawn only if every wolf is gone.",
   },
 };
 
 const PHASE_INFO = {
-  lobby: { icon: "🏘️", name: "Lobby" },
-  night: { icon: "🌙", name: "Night" },
-  "day-debate": { icon: "☀️", name: "Day Debate" },
-  voting: { icon: "🗳️", name: "Voting" },
-  resolution: { icon: "⚖️", name: "Resolving" },
-  ended: { icon: "🏁", name: "Game Over" },
-};
-
-// Small emoji badge per persona id (matches src/personas.ts)
-const PERSONA_EMOJI = {
-  wren: "🥖",
-  morgan: "🎣",
-  tobias: "🔨",
-  elspeth: "🍺",
-  rorik: "🏹",
-  isolde: "🌿",
-  callum: "🌾",
-  branwen: "🧵",
-  human: "🧭",
+  lobby: { spriteId: "lobby", name: "Lobby" },
+  night: { spriteId: "night", name: "Night" },
+  "day-debate": { spriteId: "day-debate", name: "Day Debate" },
+  voting: { spriteId: "voting", name: "Voting" },
+  resolution: { spriteId: "resolution", name: "Resolving" },
+  ended: { spriteId: "ended", name: "Game Over" },
 };
 
 const state = {
@@ -63,18 +69,24 @@ const state = {
   privateMemory: [],
   phase: "lobby",
   turn: 0,
-  // Activity: playerId -> { playerName, action, startedAt }
   activity: new Map(),
-  // In-progress speech entries: seq -> { playerId, playerName, text, el }
   inProgress: new Map(),
   lastEventAt: Date.now(),
 };
 
-function avatar(name, idx, personaId) {
-  const initial = (name || "?").charAt(0).toUpperCase();
+function spriteFor(personaId) {
+  return PERSONA_SPRITES[personaId] ?? TRAVELER;
+}
+
+function avatar(personaId, idx, opts = {}) {
   const c = (idx ?? 0) % 7;
-  const emoji = personaId && PERSONA_EMOJI[personaId] ? PERSONA_EMOJI[personaId] : "";
-  return `<span class="avatar avatar-${c}">${initial}${emoji ? `<span class="avatar-emoji">${emoji}</span>` : ""}</span>`;
+  const size = opts.size ?? 32;
+  const html = renderSprite(spriteFor(personaId), { size, className: "avatar-svg" });
+  return `<span class="tint-${c}"><span class="avatar-sprite">${html}</span></span>`;
+}
+
+function smallSprite(spec, size = 18) {
+  return renderSprite(spec, { size, className: "log-marker" });
 }
 
 function renderPlayers() {
@@ -85,7 +97,7 @@ function renderPlayers() {
     const thinking = state.activity.has(p.id);
     li.className = "player-item" + (p.alive ? "" : " dead") + (thinking ? " thinking" : "");
     li.innerHTML = `
-      ${avatar(p.name, idx, p.id)}
+      ${avatar(p.id, idx)}
       <span class="player-name">${p.name}</span>
       ${p.role ? `<span class="role-tag">${p.role}</span>` : ""}
     `;
@@ -98,7 +110,8 @@ function renderPlayers() {
 function renderRole() {
   if (!state.role) return;
   const info = ROLE_INFO[state.role];
-  $("role-emoji").textContent = info.emoji;
+  const sprite = ROLE_SPRITES[info.spriteId];
+  $("role-emoji").innerHTML = renderSprite(sprite, { size: 96 });
   $("role-name").textContent = info.name;
   const flavor = $("role-flavor");
   if (flavor) flavor.textContent = info.flavor;
@@ -109,7 +122,9 @@ function renderRole() {
   if (state.role === "werewolf" && state.knownWolves.length > 0) {
     wolvesPanel.hidden = false;
     $("known-wolves-list").innerHTML = state.knownWolves
-      .map((w, i) => `<li class="player-item">${avatar(w.name, i + 4, w.id)} <span class="player-name">${w.name}</span></li>`)
+      .map((w, i) =>
+        `<li class="player-item">${avatar(w.id, i + 4)} <span class="player-name">${w.name}</span></li>`,
+      )
       .join("");
   } else {
     wolvesPanel.hidden = true;
@@ -117,16 +132,15 @@ function renderRole() {
 
   const seerPanel = $("seer-knowledge");
   const allSeerEntries = state.privateMemory.filter((m) => m.type === "seer-check-result");
-  // Dedup by targetId — most recent check per target wins.
   const byTarget = new Map();
-  for (const entry of allSeerEntries) {
-    byTarget.set(entry.targetId, entry);
-  }
+  for (const entry of allSeerEntries) byTarget.set(entry.targetId, entry);
   const seerEntries = [...byTarget.values()];
   if (state.role === "seer" && seerEntries.length > 0) {
     seerPanel.hidden = false;
     $("seer-knowledge-list").innerHTML = seerEntries
-      .map((m) => `<li class="player-item">🔮 <span class="player-name">${m.content}</span></li>`)
+      .map((m) =>
+        `<li class="player-item">${smallSprite(SEER, 16)}<span class="player-name">${m.content}</span></li>`,
+      )
       .join("");
   } else {
     seerPanel.hidden = true;
@@ -134,8 +148,9 @@ function renderRole() {
 }
 
 function renderPhaseHeader() {
-  const info = PHASE_INFO[state.phase] ?? { icon: "❓", name: state.phase };
-  $("phase-icon").textContent = info.icon;
+  const info = PHASE_INFO[state.phase] ?? { spriteId: "lobby", name: state.phase };
+  const sprite = PHASE_SPRITES[info.spriteId];
+  $("phase-icon").innerHTML = renderSprite(sprite, { size: 28 });
   $("phase-name").textContent = info.name;
   $("turn-indicator").textContent = state.turn > 0 ? `Turn ${state.turn}` : "";
 }
@@ -145,18 +160,19 @@ function renderActivityStrip() {
   strip.innerHTML = "";
   strip.classList.remove("stalled");
   if (state.activity.size === 0) return;
-  for (const [playerId, info] of state.activity) {
+  for (const [, info] of state.activity) {
     const line = document.createElement("div");
     line.className = "activity-line";
     const verb =
       info.action === "speak" ? "is thinking" :
-      info.action === "vote" ? "is deciding a vote" :
-      info.action === "kill" ? "is choosing a victim" :
-      info.action === "save" ? "is choosing who to protect" :
+      info.action === "vote" ? "is choosing a vote" :
+      info.action === "kill" ? "is hunting" :
+      info.action === "save" ? "is healing" :
       info.action === "investigate" ? "peers into the dark" :
       "is thinking";
     line.innerHTML = `
-      <span class="player-name">${info.playerName}</span> <span style="color: var(--ink-dim)">${verb}</span>
+      <span class="player-name">${info.playerName}</span>
+      <span style="color: var(--ink-dim)">${verb}</span>
       <span class="thinking-dots"><span></span><span></span><span></span></span>
     `;
     strip.appendChild(line);
@@ -178,11 +194,25 @@ function updateStallState() {
   }
 }
 
+function logMarkerFor(logType) {
+  if (logType === "death") return SKULL_TINY;
+  if (logType === "vote-result") return BALLOT_TINY;
+  if (logType === "phase-change") return CHEVRON_TINY;
+  if (logType === "speech") return BUBBLE_TINY;
+  return null;
+}
+
 function appendLogEntry(entry) {
   const stream = $("log-stream");
   const div = document.createElement("div");
   div.className = `log-entry ${entry.logType ?? entry.type ?? "system"}`;
-  div.textContent = entry.content;
+  const marker = logMarkerFor(entry.logType ?? entry.type);
+  if (marker) {
+    div.innerHTML = `<span class="log-marker">${smallSprite(marker, 14)}</span><span class="log-text"></span>`;
+    div.querySelector(".log-text").textContent = entry.content;
+  } else {
+    div.textContent = entry.content;
+  }
   stream.appendChild(div);
   stream.scrollTop = stream.scrollHeight;
   return div;
@@ -193,7 +223,7 @@ function appendInProgressSpeech(seq, playerName) {
   const div = document.createElement("div");
   div.className = "log-entry speech in-progress";
   div.setAttribute("data-seq", String(seq));
-  div.textContent = `${playerName}: `;
+  div.innerHTML = `<span class="log-marker">${smallSprite(BUBBLE_TINY, 14)}</span><span class="log-text">${playerName}: </span>`;
   stream.appendChild(div);
   stream.scrollTop = stream.scrollHeight;
   return div;
@@ -204,22 +234,22 @@ function renderActionPanel() {
   panel.innerHTML = "";
   const me = state.players.find((p) => p.id === state.humanPlayerId);
   if (!me || !me.alive) {
-    panel.innerHTML = `<div class="action-prompt">👻 You're gone. Watch the rest unfold.</div>`;
+    panel.innerHTML = `<div class="action-prompt">${smallSprite(SKULL_TINY, 14)}You're gone. Watch the rest unfold.</div>`;
     return;
   }
   if (state.phase === "night") {
     if (state.role === "werewolf") {
-      renderTargetPicker(panel, "🐺 Pick a victim", "kill", state.livingPlayers.filter((p) => p.id !== state.humanPlayerId && !state.knownWolves.some((w) => w.id === p.id)));
+      renderTargetPicker(panel, smallSprite(WEREWOLF, 16) + "Pick a victim", "kill", state.livingPlayers.filter((p) => p.id !== state.humanPlayerId && !state.knownWolves.some((w) => w.id === p.id)));
     } else if (state.role === "seer") {
-      renderTargetPicker(panel, "🔮 Look into one soul", "investigate", state.livingPlayers.filter((p) => p.id !== state.humanPlayerId));
+      renderTargetPicker(panel, smallSprite(SEER, 16) + "Look into one soul", "investigate", state.livingPlayers.filter((p) => p.id !== state.humanPlayerId));
     } else if (state.role === "doctor") {
-      renderTargetPicker(panel, "🕯️ Guard one soul", "save", state.livingPlayers);
+      renderTargetPicker(panel, smallSprite(DOCTOR, 16) + "Guard one soul", "save", state.livingPlayers);
     } else {
-      panel.innerHTML = `<div class="action-prompt">💤 You sleep. Others move in the dark.</div>`;
+      panel.innerHTML = `<div class="action-prompt">${smallSprite(ZZZ_TINY, 14)}You sleep. Others move in the dark.</div>`;
     }
   } else if (state.phase === "day-debate") {
     panel.innerHTML = `
-      <div class="action-prompt">💬 Speak your mind.</div>
+      <div class="action-prompt">${smallSprite(BUBBLE_TINY, 14)}Speak your mind</div>
       <textarea id="say-input" class="action-input" placeholder="What do you want to say?" maxlength="400"></textarea>
       <button id="say-btn">Speak</button>
       <button id="pass-btn" class="secondary">Hold my tongue</button>
@@ -238,17 +268,17 @@ function renderActionPanel() {
       $("pass-btn").disabled = true;
     };
   } else if (state.phase === "voting") {
-    renderTargetPicker(panel, "🗳️ Vote to eliminate", "vote", state.livingPlayers.filter((p) => p.id !== state.humanPlayerId));
+    renderTargetPicker(panel, smallSprite(BALLOT_TINY, 16) + "Vote to eliminate", "vote", state.livingPlayers.filter((p) => p.id !== state.humanPlayerId));
   } else if (state.phase === "resolution") {
-    panel.innerHTML = `<div class="action-prompt">⚖️ Resolving…</div>`;
+    panel.innerHTML = `<div class="action-prompt">${smallSprite(STAR_TINY, 14)}Resolving</div>`;
   } else {
     panel.innerHTML = `<div class="action-prompt">…</div>`;
   }
 }
 
-function renderTargetPicker(panel, label, kind, targets) {
+function renderTargetPicker(panel, labelHtml, kind, targets) {
   panel.innerHTML = `
-    <div class="action-prompt">${label}</div>
+    <div class="action-prompt">${labelHtml}</div>
     <div id="target-buttons" class="target-buttons"></div>
   `;
   const tb = $("target-buttons");
@@ -337,7 +367,6 @@ async function handleServerMessage(msg) {
       state.turn = msg.turn;
       applyPhaseBodyClass();
       renderPhaseHeader();
-      // Clear activity at phase boundaries — any in-flight calls are old
       state.activity.clear();
       renderActivityStrip();
       await fetchPublicState();
@@ -345,12 +374,12 @@ async function handleServerMessage(msg) {
       renderActionPanel();
       break;
     case "log":
-      // If there's a tentative in-progress entry matching this speech, promote it
       if (msg.logType === "speech") {
         for (const [seq, ip] of state.inProgress) {
           if (ip.el && ip.playerName && msg.content.startsWith(`${ip.playerName}:`)) {
-            ip.el.className = "log-entry speech";
-            ip.el.textContent = msg.content;
+            ip.el.classList.remove("in-progress");
+            const txt = ip.el.querySelector(".log-text") ?? ip.el;
+            txt.textContent = msg.content;
             state.inProgress.delete(seq);
             return;
           }
@@ -379,12 +408,13 @@ async function handleServerMessage(msg) {
         state.inProgress.set(msg.seq, ip);
       }
       ip.text += msg.delta;
-      ip.el.textContent = `${ip.playerName}: ${ip.text}`;
+      const txt = ip.el.querySelector(".log-text") ?? ip.el;
+      txt.textContent = `${ip.playerName}: ${ip.text}`;
       $("log-stream").scrollTop = $("log-stream").scrollHeight;
       break;
     }
     case "death":
-      appendLogEntry({ logType: "death", content: `💀 ${msg.victimName} was killed in the night.` });
+      appendLogEntry({ logType: "death", content: `${msg.victimName} was killed in the night.` });
       await fetchPublicState();
       await fetchPlayerView();
       renderActionPanel();
@@ -392,7 +422,7 @@ async function handleServerMessage(msg) {
     case "vote-result":
       appendLogEntry({
         logType: "vote-result",
-        content: msg.executedName ? `🗳️ ${msg.executedName} was eliminated.` : "🗳️ No one was eliminated.",
+        content: msg.executedName ? `${msg.executedName} was eliminated.` : "No one was eliminated.",
       });
       await fetchPublicState();
       await fetchPlayerView();
@@ -404,10 +434,10 @@ async function handleServerMessage(msg) {
       showGameOver(msg);
       break;
     case "game-error":
-      appendLogEntry({ logType: "death", content: `⚠️ Game errored: ${msg.message}` });
+      appendLogEntry({ logType: "death", content: `Game errored: ${msg.message}` });
       break;
     case "action-too-late":
-      appendLogEntry({ logType: "system", content: "⏱️ Too late — the phase has moved on." });
+      appendLogEntry({ logType: "system", content: "Too late — the phase has moved on." });
       renderActionPanel();
       break;
   }
@@ -419,22 +449,23 @@ function showGameOver(msg) {
   const banner = $("winner-banner");
   const sub = $("winner-sub");
   if (msg.winner === "village") {
-    banner.textContent = "🏆 The village endures.";
+    banner.textContent = "The village endures";
     if (sub) sub.textContent = "Dawn breaks. The wolves are gone.";
   } else if (msg.winner === "wolves") {
-    banner.textContent = "🐺 The wolves feast.";
+    banner.textContent = "The wolves feast";
     if (sub) sub.textContent = "The village falls silent.";
   } else {
-    banner.textContent = "⚠️ Something went wrong.";
+    banner.textContent = "Something went wrong";
     if (sub) sub.textContent = "The night refuses to end.";
   }
   const ul = $("reveal-list");
   ul.innerHTML = (msg.reveals ?? [])
-    .map((r) => `<li><span>${r.name}</span><span class="role-tag">${r.role}</span></li>`)
+    .map((r, i) =>
+      `<li>${avatar(r.id ?? "human", i, { size: 24 })}<span style="flex:1">${r.name}</span><span class="role-tag">${r.role}</span></li>`,
+    )
     .join("");
 }
 
-// Mobile tab switching
 function setupTabs() {
   const tabs = document.querySelectorAll(".mobile-tabs button[data-tab]");
   tabs.forEach((btn) => {
@@ -447,13 +478,11 @@ function setupTabs() {
       document.body.className = classes.join(" ");
     });
   });
-  // default
   if (!document.body.className.includes("tab-")) {
     document.body.classList.add("tab-log");
   }
 }
 
-// Role card flip
 function setupRoleCardFlip() {
   const card = $("role-card");
   if (!card) return;
@@ -465,6 +494,15 @@ function setupRoleCardFlip() {
     }
   });
 }
+
+function paintLobby() {
+  const sf = $("starfield");
+  if (sf) sf.innerHTML = starfield(60, "cf-ai-werewolf-stars");
+  const moonHost = $("lobby-moon");
+  if (moonHost) moonHost.innerHTML = renderSprite(MOON, { size: 96 });
+}
+
+paintLobby();
 
 $("play-again-btn").addEventListener("click", () => {
   location.reload();
@@ -510,5 +548,4 @@ $("lobby-form").addEventListener("submit", async (e) => {
   }
 });
 
-// Stall detector — pulses activity strip yellow if 10s of silence
 setInterval(updateStallState, 1000);
