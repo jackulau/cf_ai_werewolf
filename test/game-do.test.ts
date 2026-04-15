@@ -217,6 +217,44 @@ describe("submitNightAction", () => {
     expect(memory!.privateMemory.some((m) => m.type === "seer-check-result" && m.content.includes("werewolf"))).toBe(true);
   });
 
+  it("seer check is deduped at write time — double investigation of same target+turn produces one memory row", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("seer-dedup-seed", "Tester", gameId);
+    const count = await runInDurableObject(stub, async (i, s) => {
+      const seer = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE role = 'seer'`).toArray()[0];
+      const target = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE id != ? LIMIT 1`, seer.id).toArray()[0];
+      await i.kvPutTest("turn", 1);
+      await i.submitNightAction(seer.id, "investigate", target.id);
+      // Simulate a retry / partial-failure scenario by re-calling with the same target+turn
+      await i.submitNightAction(seer.id, "investigate", target.id);
+      const rows = s.storage.sql.exec(
+        `SELECT COUNT(*) AS c FROM private_memory WHERE player_id = ? AND type = 'seer-check-result' AND turn = ? AND target_id = ?`,
+        seer.id, 1, target.id,
+      ).toArray();
+      return (rows[0] as { c: number }).c;
+    });
+    expect(count).toBe(1);
+  });
+
+  it("two seer investigations of different targets produce two memory rows", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("seer-two-seed", "Tester", gameId);
+    const count = await runInDurableObject(stub, async (i, s) => {
+      const seer = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE role = 'seer'`).toArray()[0];
+      const others = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE id != ? LIMIT 2`, seer.id).toArray();
+      await i.kvPutTest("turn", 1);
+      await i.submitNightAction(seer.id, "investigate", others[0].id);
+      await i.kvPutTest("turn", 2);
+      await i.submitNightAction(seer.id, "investigate", others[1].id);
+      const rows = s.storage.sql.exec(
+        `SELECT COUNT(*) AS c FROM private_memory WHERE player_id = ? AND type = 'seer-check-result'`,
+        seer.id,
+      ).toArray();
+      return (rows[0] as { c: number }).c;
+    });
+    expect(count).toBe(2);
+  });
+
   it("submitNightActionRandom skips when valid pool empty", async () => {
     const { stub, gameId } = newGameStub();
     await stub.createGame("empty-pool", "Tester", gameId);
@@ -469,6 +507,168 @@ describe("WebSocket: late-action and duplicate-connection handling", () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(close1Code).toBe(4001);
     ws2.close();
+  });
+});
+
+// Helper: open a WS and collect all incoming messages as parsed JSON
+async function collectMessages(
+  stub: DurableObjectStub,
+  playerId: string,
+): Promise<{ ws: WebSocket; messages: any[] }> {
+  const res = await stub.fetch(
+    new Request(`https://do/?playerId=${playerId}`, { headers: { Upgrade: "websocket" } }),
+  );
+  const ws = res.webSocket!;
+  ws.accept();
+  const messages: any[] = [];
+  ws.addEventListener("message", (e) => {
+    try { messages.push(JSON.parse(typeof e.data === "string" ? e.data : "")); } catch {}
+  });
+  return { ws, messages };
+}
+
+describe("activity broadcasts", () => {
+  it("aiSpeak emits thinking + done activity pair for fresh call", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("act-speak", "Tester", gameId);
+    vi.spyOn(env.AI, "run").mockResolvedValue({ response: "something." } as unknown as never);
+    const { ws, messages } = await collectMessages(stub, "human");
+    await runInDurableObject(stub, async (i, s) => {
+      const p = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE id != 'human' LIMIT 1`).toArray()[0];
+      await i.kvPutTest("turn", 1);
+      await i.aiSpeak(p.id, 1);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const activities = messages.filter((m) => m.type === "activity");
+    expect(activities.length).toBe(2);
+    expect(activities[0].status).toBe("thinking");
+    expect(activities[0].action).toBe("speak");
+    expect(activities[1].status).toBe("done");
+    expect(activities[1].action).toBe("speak");
+    expect(activities[0].playerId).toBe(activities[1].playerId);
+    expect(activities[0].playerName).toBeTruthy();
+    ws.close();
+  });
+
+  it("aiSpeak idempotent repeat emits NO activity broadcast (no orphan pairs)", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("act-idem", "Tester", gameId);
+    vi.spyOn(env.AI, "run").mockResolvedValue({ response: "hi" } as unknown as never);
+    const { ws, messages } = await collectMessages(stub, "human");
+    await runInDurableObject(stub, async (i, s) => {
+      const p = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE id != 'human' LIMIT 1`).toArray()[0];
+      await i.kvPutTest("turn", 1);
+      await i.aiSpeak(p.id, 1);
+      await i.aiSpeak(p.id, 1); // repeat — should be no-op
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const activities = messages.filter((m) => m.type === "activity");
+    // Exactly one thinking+done pair — the repeat call didn't produce any
+    expect(activities.length).toBe(2);
+    ws.close();
+  });
+
+  it("aiTakeNightAction emits correct action per role (kill/investigate/save)", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("act-night", "Tester", gameId);
+    vi.spyOn(env.AI, "run").mockImplementation(async (_m, inputs: any) => {
+      const enumValues = inputs?.response_format?.json_schema?.properties?.target?.enum ?? [];
+      return { response: JSON.stringify({ target: enumValues[0] ?? "x", reasoning: "ok" }) } as unknown as never;
+    });
+    const { ws, messages } = await collectMessages(stub, "human");
+    await runInDurableObject(stub, async (i, s) => {
+      await i.kvPutTest("turn", 1);
+      const wolf = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE role = 'werewolf' LIMIT 1`).toArray()[0];
+      const seer = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE role = 'seer' LIMIT 1`).toArray()[0];
+      const doctor = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE role = 'doctor' LIMIT 1`).toArray()[0];
+      await i.aiTakeNightAction(wolf.id);
+      await i.aiTakeNightAction(seer.id);
+      await i.aiTakeNightAction(doctor.id);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const activities = messages.filter((m) => m.type === "activity");
+    const actions = new Set(activities.map((a) => a.action));
+    expect(actions.has("kill")).toBe(true);
+    expect(actions.has("investigate")).toBe(true);
+    expect(actions.has("save")).toBe(true);
+    ws.close();
+  });
+
+  it("aiVote emits vote activity", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("act-vote", "Tester", gameId);
+    vi.spyOn(env.AI, "run").mockImplementation(async (_m, inputs: any) => {
+      const enumValues = inputs?.response_format?.json_schema?.properties?.target?.enum ?? [];
+      return { response: JSON.stringify({ target: enumValues[0] ?? "x", reasoning: "ok" }) } as unknown as never;
+    });
+    const { ws, messages } = await collectMessages(stub, "human");
+    await runInDurableObject(stub, async (i, s) => {
+      await i.kvPutTest("turn", 1);
+      const p = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE id != 'human' LIMIT 1`).toArray()[0];
+      await i.aiVote(p.id);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const voteActivities = messages.filter((m) => m.type === "activity" && m.action === "vote");
+    expect(voteActivities.length).toBe(2);
+    expect(voteActivities[0].status).toBe("thinking");
+    expect(voteActivities[1].status).toBe("done");
+    ws.close();
+  });
+
+  it("aiSpeak AI failure still emits done activity (no orphan thinking)", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("act-fail", "Tester", gameId);
+    vi.spyOn(env.AI, "run").mockRejectedValue(new Error("AI down"));
+    const { ws, messages } = await collectMessages(stub, "human");
+    await runInDurableObject(stub, async (i, s) => {
+      const p = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE id != 'human' LIMIT 1`).toArray()[0];
+      await i.kvPutTest("turn", 1);
+      await i.aiSpeak(p.id, 1);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const activities = messages.filter((m) => m.type === "activity");
+    const doneCount = activities.filter((a) => a.status === "done").length;
+    const thinkingCount = activities.filter((a) => a.status === "thinking").length;
+    expect(thinkingCount).toBe(doneCount);
+    ws.close();
+  });
+});
+
+describe("streaming aiSpeak broadcasts log-delta chunks", () => {
+  function sseStream(chunks: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      start(controller) {
+        for (const c of chunks) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ response: c })}\n\n`));
+        }
+        controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+        controller.close();
+      },
+    });
+  }
+
+  it("emits one log-delta per chunk, then a final log with the concat", async () => {
+    const { stub, gameId } = newGameStub();
+    await stub.createGame("stream-speak", "Tester", gameId);
+    vi.spyOn(env.AI, "run").mockImplementation(
+      async () => sseStream(["I ", "suspect ", "Morgan."]) as unknown as never,
+    );
+    const { ws, messages } = await collectMessages(stub, "human");
+    await runInDurableObject(stub, async (i, s) => {
+      const p = s.storage.sql.exec<{ id: string }>(`SELECT id FROM players WHERE id != 'human' LIMIT 1`).toArray()[0];
+      await i.kvPutTest("turn", 1);
+      await i.aiSpeak(p.id, 1);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const deltas = messages.filter((m) => m.type === "log-delta");
+    expect(deltas.length).toBe(3);
+    expect(deltas.map((d) => d.delta).join("")).toBe("I suspect Morgan.");
+    // final authoritative log message should contain the concatenated text
+    const logs = messages.filter((m) => m.type === "log" && m.logType === "speech");
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs[logs.length - 1].content).toContain("I suspect Morgan.");
+    ws.close();
   });
 });
 

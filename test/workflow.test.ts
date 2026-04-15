@@ -252,3 +252,36 @@ describe("GameWorkflow: workflow restart idempotency", () => {
     60_000,
   );
 });
+
+describe("GameWorkflow: game start produces exactly one phase-change log entry", () => {
+  it(
+    "turn 1 night phase-change is logged exactly once (not twice from old game-start step)",
+    async () => {
+      const gameId = newGameId();
+      const { stub } = await setupGame(gameId, "single-phase-seed");
+
+      mockAi((_s, _u, jsonSchema) => {
+        if (jsonSchema && typeof jsonSchema === "object") {
+          const enumValues = (jsonSchema as { properties: { target: { enum: string[] } } })
+            .properties?.target?.enum ?? [];
+          return { target: enumValues[0] ?? "x", reasoning: "ok" };
+        }
+        return "I'm just a villager, not sure what to think.";
+      });
+
+      const instance = await introspectWorkflowInstance(env.GAME_WORKFLOW, gameId);
+      await instance.modify(async (m) => { await m.disableSleeps(); });
+      await env.GAME_WORKFLOW.create({ id: gameId, params: { gameId } });
+      await expect(instance.waitForStatus("complete")).resolves.not.toThrow();
+
+      const nightPhaseCount = await runInDurableObject(stub, async (_i, s) => {
+        const r = s.storage.sql.exec<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM public_log WHERE type = 'phase-change' AND turn = 1 AND phase = 'night'`,
+        ).toArray()[0];
+        return r.c;
+      });
+      expect(nightPhaseCount).toBe(1);
+    },
+    60_000,
+  );
+});

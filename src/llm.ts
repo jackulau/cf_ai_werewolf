@@ -55,6 +55,102 @@ export async function generateText(
   return asResponseString(result);
 }
 
+/**
+ * Streamed text generation. Calls `onToken(chunk)` for each chunk of tokens
+ * as they arrive. Returns the accumulated full text.
+ *
+ * Degrades gracefully: if the AI binding returns a plain `{response: "..."}`
+ * object (non-streaming), calls `onToken` once with the full response.
+ * On mid-stream failure, returns whatever was accumulated so callers can
+ * still persist a partial log entry.
+ */
+export async function generateStreamedText(
+  ai: AiBindingLike,
+  system: string,
+  user: string,
+  onToken: (chunk: string) => void,
+  opts: GenerateTextOpts = {},
+): Promise<string> {
+  const messages: ChatMessage[] = [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+  let accumulated = "";
+  try {
+    const result = await ai.run(MODEL_ID, {
+      messages,
+      max_tokens: opts.maxTokens ?? 512,
+      temperature: opts.temperature ?? 0.7,
+      stream: true,
+    });
+
+    // Plain object response (not actually streaming) — emit all as one chunk
+    if (
+      result &&
+      typeof result === "object" &&
+      "response" in result &&
+      typeof (result as { response: unknown }).response === "string"
+    ) {
+      const text = (result as { response: string }).response;
+      onToken(text);
+      return text;
+    }
+
+    // ReadableStream of SSE-style bytes: `data: {"response":"..."}\n\n`
+    if (result && typeof (result as ReadableStream).getReader === "function") {
+      const reader = (result as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Split on newline; each SSE event is separated by a blank line
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (trimmed === "data: [DONE]") return accumulated;
+          if (trimmed.startsWith("data:")) {
+            const payload = trimmed.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(payload) as { response?: string };
+              if (typeof parsed.response === "string" && parsed.response.length > 0) {
+                accumulated += parsed.response;
+                onToken(parsed.response);
+              }
+            } catch {
+              // Malformed chunk — ignore and continue
+            }
+          }
+        }
+      }
+      // Drain any trailing buffered payload
+      const trimmed = buffer.trim();
+      if (trimmed.startsWith("data:")) {
+        const payload = trimmed.slice(5).trim();
+        if (payload && payload !== "[DONE]") {
+          try {
+            const parsed = JSON.parse(payload) as { response?: string };
+            if (typeof parsed.response === "string" && parsed.response.length > 0) {
+              accumulated += parsed.response;
+              onToken(parsed.response);
+            }
+          } catch {}
+        }
+      }
+      return accumulated;
+    }
+
+    return accumulated;
+  } catch {
+    // Partial stream: return whatever we've accumulated so far.
+    return accumulated;
+  }
+}
+
 export async function generateStructured<T>(
   ai: AiBindingLike,
   system: string,

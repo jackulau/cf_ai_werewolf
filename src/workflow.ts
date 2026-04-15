@@ -33,8 +33,9 @@ export class GameWorkflow extends WorkflowEntrypoint<Env, GameWorkflowParams> {
     const TIMEOUTS = timeouts(this.env);
 
     try {
-      // Game start announce
-      await step.do("game-start", () => stub.setPhase("night", 1, 0));
+      // The per-turn `turn-<n>-night-start` step below calls setPhase,
+      // so we don't need a separate game-start step (it would produce
+      // a second "Phase: night" log entry at turn 1).
 
       for (let turn = 1; turn <= MAX_TURNS; turn++) {
         // ───────────── NIGHT ─────────────

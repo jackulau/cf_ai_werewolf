@@ -169,3 +169,83 @@ describe("Integration: full game end-to-end", () => {
     90_000,
   );
 });
+
+describe("Integration: activity broadcasts during full game", () => {
+  async function connectWs(gameId: string, playerId: string) {
+    const res = await SELF.fetch(
+      `https://app/api/games/${gameId}/ws?playerId=${playerId}`,
+      { headers: { Upgrade: "websocket" } },
+    );
+    const ws = res.webSocket!;
+    ws.accept();
+    const messages: any[] = [];
+    ws.addEventListener("message", (e) => {
+      try { messages.push(JSON.parse(typeof e.data === "string" ? e.data : "")); } catch {}
+    });
+    return { ws, messages };
+  }
+
+  it(
+    "thinking activity pairs with a done activity for every AI call",
+    async () => {
+      mockAi((_s, _u, jsonSchema) => {
+        if (jsonSchema && typeof jsonSchema === "object") {
+          const enumValues = (jsonSchema as { properties: { target: { enum: string[] } } })
+            .properties?.target?.enum ?? [];
+          return { target: enumValues[0] ?? "x", reasoning: "ok" };
+        }
+        return "A careful word.";
+      });
+      const created = await startGame(newName());
+      const { ws, messages } = await connectWs(created.gameId, created.humanPlayerId);
+
+      const intro = await introspectWorkflowInstance(env.GAME_WORKFLOW, created.gameId);
+      await intro.modify(async (m) => { await m.disableSleeps(); });
+      await intro.waitForStatus("complete");
+      // give WS a moment to drain
+      await new Promise((r) => setTimeout(r, 200));
+
+      const activities = messages.filter((m) => m.type === "activity");
+      expect(activities.length).toBeGreaterThan(0);
+
+      // Every thinking has a matching done for the same (playerId, action)
+      const thinking = activities.filter((a) => a.status === "thinking");
+      const done = activities.filter((a) => a.status === "done");
+      expect(thinking.length).toBe(done.length);
+
+      const key = (a: any) => `${a.playerId}|${a.action}`;
+      const thinkingCounts = new Map<string, number>();
+      const doneCounts = new Map<string, number>();
+      for (const t of thinking) thinkingCounts.set(key(t), (thinkingCounts.get(key(t)) ?? 0) + 1);
+      for (const d of done) doneCounts.set(key(d), (doneCounts.get(key(d)) ?? 0) + 1);
+      for (const [k, c] of thinkingCounts) {
+        expect(doneCounts.get(k) ?? 0, `done count for ${k}`).toBe(c);
+      }
+      ws.close();
+    },
+    120_000,
+  );
+
+  it(
+    "LLM hard failure still emits a matching done activity (no orphan thinking)",
+    async () => {
+      vi.spyOn(env.AI, "run").mockRejectedValue(new Error("AI 500"));
+      const created = await startGame(newName());
+      const { ws, messages } = await connectWs(created.gameId, created.humanPlayerId);
+      const intro = await introspectWorkflowInstance(env.GAME_WORKFLOW, created.gameId);
+      await intro.modify(async (m) => { await m.disableSleeps(); });
+      try {
+        await intro.waitForStatus("complete");
+      } catch {
+        try { await intro.waitForStatus("errored"); } catch {}
+      }
+      await new Promise((r) => setTimeout(r, 200));
+      const activities = messages.filter((m) => m.type === "activity");
+      const thinking = activities.filter((a) => a.status === "thinking").length;
+      const done = activities.filter((a) => a.status === "done").length;
+      expect(thinking).toBe(done);
+      ws.close();
+    },
+    120_000,
+  );
+});

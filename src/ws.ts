@@ -23,6 +23,21 @@ export type ServerMessage =
     }
   | { type: "game-error"; message: string }
   | { type: "action-too-late"; currentPhase: Phase }
+  | {
+      type: "activity";
+      playerId: string;
+      playerName: string;
+      status: "thinking" | "done";
+      action: "speak" | "kill" | "save" | "investigate" | "vote";
+      turn: number;
+    }
+  | {
+      type: "log-delta";
+      seq: number;
+      playerId: string;
+      playerName: string;
+      delta: string;
+    }
   | { type: "ack"; ok: true; for: string };
 
 // Client → Server messages

@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
-import { generateStructured, generateText, LLMValidationError } from "./llm";
+import { generateStreamedText, generateStructured, generateText, LLMValidationError } from "./llm";
 import { pickPersonas } from "./personas";
 import {
   assignRoles,
@@ -442,14 +442,25 @@ export class GameDurableObject extends DurableObject<Env> {
       this.appendMemory(playerId, "wolf-kill-decision", `I voted to kill ${targetPlayer.name}.`, turn, target);
     }
     if (action === "investigate") {
-      const result = targetPlayer.role === "werewolf" ? "is a werewolf" : "is NOT a werewolf";
-      this.appendMemory(
-        playerId,
-        "seer-check-result",
-        `${targetPlayer.name} ${result} (investigated turn ${turn}).`,
-        turn,
-        target,
-      );
+      // Server-side dedup: skip if we've already recorded this exact
+      // investigation. Prevents duplicate rows if a workflow step
+      // partially completed and got retried.
+      const existing = this.ctx.storage.sql
+        .exec(
+          `SELECT 1 FROM private_memory WHERE player_id = ? AND type = 'seer-check-result' AND turn = ? AND target_id = ? LIMIT 1`,
+          playerId, turn, target,
+        )
+        .toArray();
+      if (existing.length === 0) {
+        const result = targetPlayer.role === "werewolf" ? "is a werewolf" : "is NOT a werewolf";
+        this.appendMemory(
+          playerId,
+          "seer-check-result",
+          `${targetPlayer.name} ${result} (investigated turn ${turn}).`,
+          turn,
+          target,
+        );
+      }
     }
   }
 
@@ -502,7 +513,7 @@ export class GameDurableObject extends DurableObject<Env> {
   // ─── Public RPC: AI take night action ────────────────────────────────────
   async aiTakeNightAction(playerId: string): Promise<void> {
     const turn = (await this.kvGet<number>(KV_KEYS.turn)) ?? 0;
-    // Idempotency: if already recorded, skip
+    // Idempotency: if already recorded, skip (no activity broadcast for no-op)
     const existing = this.ctx.storage.sql
       .exec(`SELECT 1 FROM night_actions WHERE turn = ? AND actor_id = ? LIMIT 1`, turn, playerId)
       .toArray();
@@ -512,6 +523,34 @@ export class GameDurableObject extends DurableObject<Env> {
     if (!player || !player.alive) return;
     if (player.role === "villager") return;
 
+    const activityAction: "kill" | "save" | "investigate" =
+      player.role === "werewolf" ? "kill" :
+      player.role === "seer" ? "investigate" : "save";
+    this.broadcast({
+      type: "activity",
+      playerId: player.id,
+      playerName: player.name,
+      status: "thinking",
+      action: activityAction,
+      turn,
+    });
+
+    try {
+      await this.aiTakeNightActionInner(player, turn);
+    } finally {
+      this.broadcast({
+        type: "activity",
+        playerId: player.id,
+        playerName: player.name,
+        status: "done",
+        action: activityAction,
+        turn,
+      });
+    }
+  }
+
+  private async aiTakeNightActionInner(player: Player, turn: number): Promise<void> {
+    const playerId = player.id;
     const ctx = await this.buildPromptContext(playerId);
     let target: string | null = null;
     let action: NightActionType;
@@ -573,7 +612,7 @@ export class GameDurableObject extends DurableObject<Env> {
   // ─── Public RPC: AI speak (day debate) ───────────────────────────────────
   async aiSpeak(playerId: string, round: number): Promise<void> {
     const turn = (await this.kvGet<number>(KV_KEYS.turn)) ?? 0;
-    // Idempotency check
+    // Idempotency check — no activity for a no-op repeat
     const existing = this.ctx.storage.sql
       .exec(`SELECT 1 FROM aiSpeakRecord WHERE turn = ? AND round = ? AND player_id = ? LIMIT 1`,
             turn, round, playerId)
@@ -583,14 +622,65 @@ export class GameDurableObject extends DurableObject<Env> {
     const player = this.playerById(playerId);
     if (!player || !player.alive) return;
 
+    this.broadcast({
+      type: "activity",
+      playerId: player.id,
+      playerName: player.name,
+      status: "thinking",
+      action: "speak",
+      turn,
+    });
+
+    try {
+      await this.aiSpeakInner(player, turn, round);
+    } finally {
+      this.broadcast({
+        type: "activity",
+        playerId: player.id,
+        playerName: player.name,
+        status: "done",
+        action: "speak",
+        turn,
+      });
+    }
+  }
+
+  private async aiSpeakInner(player: Player, turn: number, round: number): Promise<void> {
+    const playerId = player.id;
     const ctx = await this.buildPromptContext(playerId);
     let say: string;
     try {
       const prompt = buildDayTalkPrompt(ctx, round);
-      say = await generateText(
+      // Streaming speech: broadcast log-delta chunks as they arrive so UI
+      // shows tokens appearing in real-time. The accumulated text is still
+      // written as a single authoritative public_log entry at the end.
+      let accumulated = "";
+      let seq = -1;
+      await generateStreamedText(
         this.env.AI as unknown as { run: (m: string, i: unknown) => Promise<unknown> },
-        prompt.system, prompt.user, { maxTokens: 200 },
+        prompt.system,
+        prompt.user,
+        (chunk) => {
+          if (!chunk) return;
+          accumulated += chunk;
+          if (seq < 0) {
+            // First chunk — allocate a sequence number by reading current max+1
+            const row = this.ctx.storage.sql
+              .exec<{ m: number | null }>(`SELECT MAX(seq) AS m FROM public_log`)
+              .toArray()[0];
+            seq = ((row?.m ?? 0) as number) + 1;
+          }
+          this.broadcast({
+            type: "log-delta",
+            seq,
+            playerId: player.id,
+            playerName: player.name,
+            delta: chunk,
+          });
+        },
+        { maxTokens: 200 },
       );
+      say = accumulated;
     } catch (e) {
       say = "I'm not sure what to make of all this.";
     }
@@ -609,7 +699,7 @@ export class GameDurableObject extends DurableObject<Env> {
   // ─── Public RPC: AI vote ─────────────────────────────────────────────────
   async aiVote(playerId: string): Promise<void> {
     const turn = (await this.kvGet<number>(KV_KEYS.turn)) ?? 0;
-    // Idempotency
+    // Idempotency — no activity broadcast for no-op repeat
     const existing = this.ctx.storage.sql
       .exec(`SELECT 1 FROM votes WHERE turn = ? AND voter_id = ? LIMIT 1`, turn, playerId)
       .toArray();
@@ -618,6 +708,30 @@ export class GameDurableObject extends DurableObject<Env> {
     const player = this.playerById(playerId);
     if (!player || !player.alive) return;
 
+    this.broadcast({
+      type: "activity",
+      playerId: player.id,
+      playerName: player.name,
+      status: "thinking",
+      action: "vote",
+      turn,
+    });
+    try {
+      await this.aiVoteInner(player, turn);
+    } finally {
+      this.broadcast({
+        type: "activity",
+        playerId: player.id,
+        playerName: player.name,
+        status: "done",
+        action: "vote",
+        turn,
+      });
+    }
+  }
+
+  private async aiVoteInner(player: Player, turn: number): Promise<void> {
+    const playerId = player.id;
     const ctx = await this.buildPromptContext(playerId);
     let targetId: string | null = null;
     try {

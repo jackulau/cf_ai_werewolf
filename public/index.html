@@ -4,19 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>cf_ai_werewolf — Werewolf with AI Villagers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body class="phase-lobby">
   <div id="app">
     <div id="lobby" class="screen">
+      <div class="moon"></div>
       <header class="lobby-header">
-        <h1>cf_ai_werewolf</h1>
-        <p class="tagline">Survive the night with six AI villagers — two of them want you dead.</p>
+        <h1>cf<span class="underscore">_</span>ai<span class="underscore">_</span>werewolf</h1>
+        <p class="tagline">Seven gather by the fire. Two are not what they seem.</p>
       </header>
       <form id="lobby-form" autocomplete="off">
         <label for="name-input">Your name</label>
-        <input id="name-input" type="text" maxlength="40" placeholder="e.g. Tester" required>
-        <button id="start-btn" type="submit">Start game</button>
+        <input id="name-input" type="text" maxlength="40" placeholder="Traveler" required autocomplete="off" spellcheck="false" autocapitalize="none">
+        <button id="start-btn" type="submit">
+          <span class="btn-label">Enter the village</span>
+          <span class="spinner" hidden aria-hidden="true"></span>
+        </button>
       </form>
       <div id="lobby-error" class="error" hidden></div>
     </div>
@@ -24,36 +31,54 @@
     <div id="game" class="screen" hidden>
       <header id="game-header">
         <div id="phase-indicator">
-          <span id="phase-icon">🌙</span>
+          <span id="phase-icon" aria-hidden="true">🌙</span>
           <span id="phase-name">Night</span>
           <span id="turn-indicator"></span>
-        </div>
-        <div id="role-card">
-          <span id="role-emoji">❓</span>
-          <span id="role-name">…</span>
         </div>
         <div id="alive-counter" title="Living players">7/7 alive</div>
       </header>
 
+      <aside id="role-card" class="role-card" tabindex="0" title="Click to read your role's abilities">
+        <div class="role-card-inner">
+          <div class="role-card-front">
+            <div class="role-card-border">
+              <span class="role-card-emoji" id="role-emoji" aria-hidden="true">❓</span>
+              <span class="role-card-title" id="role-name">…</span>
+              <span class="role-card-flavor" id="role-flavor"></span>
+            </div>
+          </div>
+          <div class="role-card-back">
+            <p id="role-description"></p>
+          </div>
+        </div>
+      </aside>
+
+      <nav class="mobile-tabs" aria-label="View">
+        <button type="button" data-tab="log" class="active">Log</button>
+        <button type="button" data-tab="players">Players</button>
+        <button type="button" data-tab="action">Act</button>
+      </nav>
+
       <main id="game-main">
-        <section id="players-panel">
+        <section id="players-panel" class="pane" data-pane="players">
           <h2>Players</h2>
           <ul id="players-list"></ul>
           <div id="known-wolves" hidden>
-            <h3>Your pack 🐺</h3>
+            <h3>Your pack</h3>
             <ul id="known-wolves-list"></ul>
           </div>
           <div id="seer-knowledge" hidden>
-            <h3>Visions 🔮</h3>
+            <h3>Visions</h3>
             <ul id="seer-knowledge-list"></ul>
           </div>
         </section>
 
-        <section id="log-panel">
+        <section id="log-panel" class="pane" data-pane="log">
+          <div id="activity-strip" class="activity-strip" aria-live="polite"></div>
           <div id="log-stream"></div>
         </section>
 
-        <section id="action-panel">
+        <section id="action-panel" class="pane" data-pane="action">
           <div id="action-content">Waiting…</div>
         </section>
       </main>
@@ -61,8 +86,9 @@
 
     <div id="game-over" class="screen" hidden>
       <h1 id="winner-banner">Game over</h1>
+      <p class="game-over-sub" id="winner-sub"></p>
       <ul id="reveal-list"></ul>
-      <button id="play-again-btn">Play another game</button>
+      <button id="play-again-btn">Another round</button>
     </div>
   </div>
   <script type="module" src="/app.js"></script>

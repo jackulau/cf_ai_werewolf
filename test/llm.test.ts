@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import {
+  generateStreamedText,
   generateStructured,
   generateText,
   LLMValidationError,
@@ -125,5 +126,89 @@ describe("generateStructured", () => {
       expect(e).toBeInstanceOf(LLMValidationError);
       expect((e as LLMValidationError).raw).toBe("raw garbage 123");
     }
+  });
+});
+
+describe("generateStreamedText", () => {
+  /** Build a ReadableStream that emits the given SSE chunks */
+  function sseStream(payloads: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      start(controller) {
+        for (const p of payloads) {
+          controller.enqueue(encoder.encode(`data: ${p}\n\n`));
+        }
+        controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+        controller.close();
+      },
+    });
+  }
+
+  it("accumulates chunks from a streamed SSE response", async () => {
+    const ai = {
+      run: vi.fn(async () =>
+        sseStream([
+          JSON.stringify({ response: "Hello, " }),
+          JSON.stringify({ response: "world" }),
+          JSON.stringify({ response: "!" }),
+        ]),
+      ),
+    };
+    const tokens: string[] = [];
+    const full = await generateStreamedText(ai, "sys", "usr", (c) => tokens.push(c));
+    expect(full).toBe("Hello, world!");
+    expect(tokens).toEqual(["Hello, ", "world", "!"]);
+  });
+
+  it("degrades gracefully when binding returns a non-stream {response}", async () => {
+    const ai = { run: vi.fn(async () => ({ response: "non-stream text" })) };
+    const tokens: string[] = [];
+    const full = await generateStreamedText(ai, "sys", "usr", (c) => tokens.push(c));
+    expect(full).toBe("non-stream text");
+    expect(tokens).toEqual(["non-stream text"]);
+  });
+
+  it("partial stream failure returns accumulated text", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ response: "part1 " })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ response: "part2" })}\n\n`));
+        await new Promise((r) => setTimeout(r, 10));
+        controller.error(new Error("stream broke"));
+      },
+    });
+    const ai = { run: vi.fn(async () => stream) };
+    const tokens: string[] = [];
+    const full = await generateStreamedText(ai, "sys", "usr", (c) => tokens.push(c));
+    expect(full).toBe("part1 part2");
+    expect(tokens).toEqual(["part1 ", "part2"]);
+  });
+
+  it("empty stream returns empty string", async () => {
+    const ai = { run: vi.fn(async () => sseStream([])) };
+    const tokens: string[] = [];
+    const full = await generateStreamedText(ai, "sys", "usr", (c) => tokens.push(c));
+    expect(full).toBe("");
+    expect(tokens).toEqual([]);
+  });
+
+  it("calls AI.run with stream:true", async () => {
+    const ai = {
+      run: vi.fn(async (_m: string, _inputs: unknown) =>
+        sseStream([JSON.stringify({ response: "x" })]),
+      ),
+    };
+    await generateStreamedText(ai, "s", "u", () => {});
+    const inputs = ai.run.mock.calls[0]![1] as { stream?: boolean };
+    expect(inputs.stream).toBe(true);
+  });
+
+  it("AI binding throw returns empty accumulated", async () => {
+    const ai = { run: vi.fn(async () => { throw new Error("network"); }) };
+    const tokens: string[] = [];
+    const full = await generateStreamedText(ai, "s", "u", (c) => tokens.push(c));
+    expect(full).toBe("");
+    expect(tokens).toEqual([]);
   });
 });
