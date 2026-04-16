@@ -827,4 +827,234 @@ button.secondary {
   .role-card-emoji { width: 48px; height: 48px; }
   .role-card-title { font-size: 0.55rem; }
   .lobby-moon { transform: scale(0.6); top: 4%; right: 4%; }
+  .help-btn { top: 12px; right: 12px; width: 36px; height: 36px; font-size: 1rem; }
+  .help-panel { width: 96vw; max-height: 84vh; }
+}
+
+/* ─── lobby footer ───────────────────────────────────────── */
+
+.lobby-footer {
+  margin-top: 28px;
+  font-family: var(--font-display);
+  font-size: 0.45rem;
+  letter-spacing: 0.14em;
+  color: var(--ink-dim);
+  text-transform: lowercase;
+  opacity: 0.6;
+}
+
+/* ─── help button (always visible, top-right) ────────────── */
+
+.help-btn {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 50;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  background: var(--bg-panel);
+  color: var(--phase-accent);
+  border: 2px solid var(--border-strong);
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 4px 4px 0 var(--shadow-color);
+  transition: transform var(--transition-fast),
+              box-shadow var(--transition-fast),
+              background var(--transition-fast),
+              color var(--transition-fast);
+}
+.help-btn:hover {
+  background: var(--phase-accent);
+  color: var(--bg-void);
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--shadow-color);
+}
+.help-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--shadow-color);
+}
+
+/* ─── help modal ─────────────────────────────────────────── */
+
+.help-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: help-in 180ms steps(4) both;
+}
+.help-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 20, 0.82);
+  cursor: pointer;
+}
+.help-panel {
+  position: relative;
+  background: var(--bg-panel);
+  border: 3px solid var(--border-strong);
+  box-shadow: 8px 8px 0 var(--shadow-color);
+  width: min(560px, 94vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 1;
+}
+.help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 2px solid var(--border-color);
+  background: var(--bg-panel-strong);
+}
+.help-header h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  color: var(--phase-accent);
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+.help-close-btn {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 2px solid transparent;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  line-height: 1;
+  box-shadow: none;
+}
+.help-close-btn:hover {
+  color: var(--phase-accent);
+  border-color: var(--border-strong);
+  background: var(--bg-panel-soft);
+  transform: none;
+  box-shadow: none;
+}
+.help-body {
+  overflow-y: auto;
+  padding: 18px 22px 22px;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.55;
+}
+.help-section + .help-section { margin-top: 18px; }
+.help-section h3 { margin: 0 0 8px; color: var(--ink-soft); }
+.help-section p { margin: 0 0 8px; }
+.help-section strong { color: var(--phase-accent); font-weight: 600; }
+.help-roles,
+.help-phases,
+.help-controls {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.help-controls kbd {
+  font-family: var(--font-mono);
+  background: var(--bg-void);
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+  padding: 0 6px;
+  font-size: 0.9em;
+}
+
+@keyframes help-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ─── action banner + your-turn highlight ────────────────── */
+
+.action-banner {
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 10px;
+  color: var(--bg-void);
+  background: var(--phase-accent);
+  border: 2px solid var(--bg-void);
+  box-shadow: 3px 3px 0 var(--shadow-color);
+  animation: your-turn-pulse 1400ms steps(4) infinite;
+}
+
+#action-panel.your-turn {
+  outline: 2px solid var(--phase-accent);
+  outline-offset: -2px;
+  box-shadow: 4px 4px 0 var(--shadow-color), 0 0 0 4px var(--phase-accent);
+}
+
+@keyframes your-turn-pulse {
+  0%, 100% { filter: none; }
+  50%      { filter: brightness(1.25); }
+}
+
+/* ─── death overlay ──────────────────────────────────────── */
+
+.death-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: help-in 220ms steps(4) both;
+}
+.death-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 20, 0.92);
+}
+.death-panel {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-panel);
+  border: 3px solid var(--accent-wolf);
+  box-shadow: 8px 8px 0 var(--shadow-color);
+  padding: 28px 28px 22px;
+  width: min(460px, 92vw);
+  text-align: center;
+}
+.death-panel h2 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--accent-wolf);
+  letter-spacing: 0.08em;
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  text-shadow: 3px 3px 0 var(--shadow-color);
+}
+.death-sub {
+  color: var(--ink-soft);
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+.death-role {
+  color: var(--ink);
+  margin: 0 0 18px;
+  font-size: 1rem;
+}
+.death-role strong { color: var(--accent-gold); }
+#death-continue-btn {
+  background: var(--accent-wolf);
+  color: var(--ink);
+  border: 2px solid var(--bg-void);
+  padding: 10px 18px;
+}
+#death-continue-btn:hover {
+  background: var(--ink);
+  color: var(--accent-wolf);
+  border-color: var(--accent-wolf);
 }

@@ -72,6 +72,7 @@ const state = {
   activity: new Map(),
   inProgress: new Map(),
   lastEventAt: Date.now(),
+  deathShown: false,
 };
 
 function spriteFor(personaId) {
@@ -229,10 +230,45 @@ function appendInProgressSpeech(seq, playerName) {
   return div;
 }
 
+function isHumanTurn(me) {
+  if (!me || !me.alive) return false;
+  if (state.phase === "night") {
+    return state.role === "werewolf" || state.role === "seer" || state.role === "doctor";
+  }
+  if (state.phase === "day-debate" || state.phase === "voting") return true;
+  return false;
+}
+
+function setActionBanner(text) {
+  const banner = $("action-banner");
+  const panel = $("action-panel");
+  if (!banner || !panel) return;
+  if (text) {
+    banner.textContent = text;
+    banner.hidden = false;
+    panel.classList.add("your-turn");
+  } else {
+    banner.hidden = true;
+    banner.textContent = "";
+    panel.classList.remove("your-turn");
+  }
+}
+
 function renderActionPanel() {
   const panel = $("action-content");
   panel.innerHTML = "";
   const me = state.players.find((p) => p.id === state.humanPlayerId);
+  if (isHumanTurn(me)) {
+    const banner =
+      state.phase === "night"
+        ? "Your turn — act in secret"
+        : state.phase === "day-debate"
+        ? "Your turn to speak"
+        : "Your turn to vote";
+    setActionBanner(banner);
+  } else {
+    setActionBanner(null);
+  }
   if (!me || !me.alive) {
     panel.innerHTML = `<div class="action-prompt">${smallSprite(SKULL_TINY, 14)}You're gone. Watch the rest unfold.</div>`;
     return;
@@ -330,6 +366,39 @@ async function fetchPublicState() {
       appendLogEntry({ logType: e.type, content: e.content });
     }
   }
+  checkHumanDeath();
+}
+
+function checkHumanDeath() {
+  if (state.deathShown) return;
+  if (!state.humanPlayerId) return;
+  const me = state.players.find((p) => p.id === state.humanPlayerId);
+  if (me && !me.alive) {
+    state.deathShown = true;
+    showDeathOverlay();
+  }
+}
+
+function showDeathOverlay() {
+  const overlay = $("death-overlay");
+  if (!overlay) return;
+  const info = state.role ? ROLE_INFO[state.role] : null;
+  const roleLabel = info ? info.name : "Unknown";
+  const flavor = info ? info.flavor : "";
+  const title = $("death-title");
+  const sub = $("death-sub");
+  const roleEl = $("death-role");
+  if (title) title.textContent = "You have died";
+  if (sub) sub.textContent = "The village story goes on without you. Watch and see how it ends.";
+  if (roleEl) roleEl.innerHTML = `You were the <strong>${roleLabel}</strong>${flavor ? ` — ${flavor.toLowerCase()}.` : "."}`;
+  overlay.hidden = false;
+  const btn = $("death-continue-btn");
+  if (btn) btn.focus();
+}
+
+function dismissDeathOverlay() {
+  const overlay = $("death-overlay");
+  if (overlay) overlay.hidden = true;
 }
 
 function applyPhaseBodyClass() {
@@ -413,21 +482,36 @@ async function handleServerMessage(msg) {
       $("log-stream").scrollTop = $("log-stream").scrollHeight;
       break;
     }
-    case "death":
-      appendLogEntry({ logType: "death", content: `${msg.victimName} was killed in the night.` });
-      await fetchPublicState();
-      await fetchPlayerView();
-      renderActionPanel();
-      break;
-    case "vote-result":
+    case "death": {
+      const mePlayer = state.players.find((p) => p.id === state.humanPlayerId);
+      const isMe = mePlayer && msg.victimName === mePlayer.name;
       appendLogEntry({
-        logType: "vote-result",
-        content: msg.executedName ? `${msg.executedName} was eliminated.` : "No one was eliminated.",
+        logType: "death",
+        content: isMe
+          ? `You (${msg.victimName}) were killed in the night.`
+          : `${msg.victimName} was killed in the night.`,
       });
       await fetchPublicState();
       await fetchPlayerView();
       renderActionPanel();
       break;
+    }
+    case "vote-result": {
+      const mePlayer = state.players.find((p) => p.id === state.humanPlayerId);
+      const isMe = mePlayer && msg.executedName === mePlayer.name;
+      appendLogEntry({
+        logType: "vote-result",
+        content: isMe
+          ? `You (${msg.executedName}) were eliminated by the village.`
+          : msg.executedName
+          ? `${msg.executedName} was eliminated.`
+          : "No one was eliminated.",
+      });
+      await fetchPublicState();
+      await fetchPlayerView();
+      renderActionPanel();
+      break;
+    }
     case "game-over":
       state.phase = "ended";
       applyPhaseBodyClass();
@@ -549,3 +633,45 @@ $("lobby-form").addEventListener("submit", async (e) => {
 });
 
 setInterval(updateStallState, 1000);
+
+// ── help modal ─────────────────────────────────────────────
+function setupHelpModal() {
+  const btn = $("help-btn");
+  const modal = $("help-modal");
+  if (!btn || !modal) return;
+  let lastFocus = null;
+
+  const open = () => {
+    lastFocus = document.activeElement;
+    modal.hidden = false;
+    const close = modal.querySelector("#help-close-btn");
+    if (close) close.focus();
+  };
+  const close = () => {
+    modal.hidden = true;
+    if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+  };
+
+  btn.addEventListener("click", open);
+  modal.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    if (t.id === "help-close-btn" || t.getAttribute("data-close") === "backdrop") {
+      close();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!modal.hidden && (e.key === "Escape" || e.key === "Esc")) {
+      e.preventDefault();
+      close();
+    }
+  });
+}
+
+setupHelpModal();
+
+function setupDeathOverlay() {
+  const btn = $("death-continue-btn");
+  if (btn) btn.addEventListener("click", dismissDeathOverlay);
+}
+setupDeathOverlay();

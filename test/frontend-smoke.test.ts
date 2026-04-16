@@ -7,8 +7,12 @@ describe("frontend asset serving", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("<title>");
-    expect(body).toContain("cf_ai_werewolf");
+    expect(body).toContain("Moonlit Village");
     expect(body).toContain('id="app"');
+    // Repo slug must not be the lobby title — it can only appear in a muted footer.
+    const headerMatch = body.match(/<header[^>]*class="lobby-header"[\s\S]*?<\/header>/);
+    expect(headerMatch, "lobby-header found").toBeTruthy();
+    expect(headerMatch![0]).not.toContain("cf_ai_werewolf");
   });
 
   it("GET /styles.css returns CSS", async () => {
@@ -57,6 +61,81 @@ describe("frontend asset serving", () => {
     expect(btnMatch).toBeTruthy();
     const btn = btnMatch![0];
     expect(btn).toMatch(/class="spinner"[^>]*hidden/);
+  });
+});
+
+describe("help modal", () => {
+  it("help button is rendered and accessible", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    expect(body).toContain('id="help-btn"');
+    expect(body).toMatch(/<button[^>]*id="help-btn"[^>]*aria-label="[^"]+"/);
+  });
+
+  it("help modal markup exists with dialog role and is hidden by default", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    const modal = body.match(/<div[^>]*id="help-modal"[^>]*>/);
+    expect(modal, "help-modal element present").toBeTruthy();
+    expect(modal![0]).toContain('role="dialog"');
+    expect(modal![0]).toContain('aria-modal="true"');
+    expect(modal![0]).toContain("hidden");
+  });
+
+  it("help modal has close button, backdrop, and rules sections", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    expect(body).toContain('id="help-close-btn"');
+    expect(body).toContain('data-close="backdrop"');
+    // the three information sections a player needs
+    expect(body).toMatch(/Roles/i);
+    expect(body).toMatch(/Night/);
+    expect(body).toMatch(/Voting/);
+  });
+
+  it("app.js wires help button to toggle the modal and closes on Esc", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).toContain("help-btn");
+    expect(body).toContain("help-modal");
+    expect(body).toMatch(/["']Escape["']|["']Esc["']/);
+  });
+});
+
+describe("death overlay", () => {
+  it("death overlay markup exists with dialog role, hidden by default", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    const modal = body.match(/<div[^>]*id="death-overlay"[^>]*>/);
+    expect(modal, "death-overlay element present").toBeTruthy();
+    expect(modal![0]).toContain('role="dialog"');
+    expect(modal![0]).toContain('aria-modal="true"');
+    expect(modal![0]).toContain("hidden");
+  });
+
+  it("death overlay has title, sub, role slot, and continue button", async () => {
+    const res = await SELF.fetch("https://app/");
+    const body = await res.text();
+    expect(body).toContain('id="death-title"');
+    expect(body).toContain('id="death-sub"');
+    expect(body).toContain('id="death-role"');
+    expect(body).toContain('id="death-continue-btn"');
+  });
+
+  it("app.js shows death overlay when the human transitions from alive to dead", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    expect(body).toContain("checkHumanDeath");
+    expect(body).toContain("showDeathOverlay");
+    expect(body).toContain("deathShown");
+  });
+
+  it("app.js highlights self-death in the log", async () => {
+    const res = await SELF.fetch("https://app/app.js");
+    const body = await res.text();
+    // Self-killed and self-eliminated must produce distinct "You (...)" text
+    expect(body).toMatch(/You\s*\(\$\{[^}]*\}\)\s+were\s+killed/);
+    expect(body).toMatch(/You\s*\(\$\{[^}]*\}\)\s+were\s+eliminated/);
   });
 });
 

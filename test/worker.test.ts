@@ -117,7 +117,7 @@ describe("static asset fallback", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("<title>");
-    expect(body).toContain("cf_ai_werewolf");
+    expect(body).toContain("Moonlit Village");
   });
 
   it("GET /unknown-path falls back to index.html (SPA)", async () => {

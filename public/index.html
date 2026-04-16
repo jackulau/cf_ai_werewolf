@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>cf_ai_werewolf — Werewolf with AI Villagers</title>
+  <title>Moonlit Village — Werewolf with AI Villagers</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
@@ -11,11 +11,14 @@
 </head>
 <body class="phase-lobby">
   <div id="starfield" aria-hidden="true"></div>
+
+  <button id="help-btn" type="button" class="help-btn" aria-label="How to play" title="How to play">?</button>
+
   <div id="app">
     <div id="lobby" class="screen">
       <div class="lobby-moon" id="lobby-moon" aria-hidden="true"></div>
       <header class="lobby-header">
-        <h1>cf<span class="underscore">_</span>ai<span class="underscore">_</span>werewolf</h1>
+        <h1>Moonlit<span class="title-break"> </span>Village</h1>
         <p class="tagline">Seven gather by the fire. Two are not what they seem.</p>
       </header>
       <form id="lobby-form" autocomplete="off">
@@ -27,6 +30,7 @@
         </button>
       </form>
       <div id="lobby-error" class="error" hidden></div>
+      <footer class="lobby-footer" aria-hidden="true">built on Cloudflare · cf_ai_werewolf</footer>
     </div>
 
     <div id="game" class="screen" hidden>
@@ -80,6 +84,7 @@
         </section>
 
         <section id="action-panel" class="pane" data-pane="action">
+          <div id="action-banner" class="action-banner" hidden></div>
           <div id="action-content">Waiting…</div>
         </section>
       </main>
@@ -92,6 +97,67 @@
       <button id="play-again-btn">Another round</button>
     </div>
   </div>
+
+  <div id="death-overlay" class="death-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="death-title">
+    <div class="death-backdrop" aria-hidden="true"></div>
+    <div class="death-panel" role="document">
+      <h2 id="death-title">You have died</h2>
+      <p id="death-sub" class="death-sub"></p>
+      <p id="death-role" class="death-role"></p>
+      <button type="button" id="death-continue-btn">Keep watching</button>
+    </div>
+  </div>
+
+  <div id="help-modal" class="help-modal" hidden role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="help-backdrop" data-close="backdrop"></div>
+    <div class="help-panel" role="document">
+      <header class="help-header">
+        <h2 id="help-title">How to play</h2>
+        <button type="button" id="help-close-btn" class="help-close-btn" aria-label="Close help">×</button>
+      </header>
+      <div class="help-body">
+        <section class="help-section">
+          <p>
+            You are one of seven villagers. Two of you are secretly
+            <strong>werewolves</strong>. Every night the wolves pick someone to kill.
+            Every day the survivors argue, then vote to execute one person.
+            <strong>Village wins</strong> when every wolf is gone.
+            <strong>Wolves win</strong> when they equal or outnumber the villagers.
+          </p>
+        </section>
+
+        <section class="help-section">
+          <h3>Roles</h3>
+          <ul class="help-roles">
+            <li><strong>Villager</strong> — no power. Read the room, argue, vote well.</li>
+            <li><strong>Seer</strong> — each night, learn if one player is a wolf.</li>
+            <li><strong>Doctor</strong> — each night, protect one player from the wolves. Not yourself twice in a row.</li>
+            <li><strong>Werewolf</strong> — each night, pick a victim with your pack. By day, blend in.</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3>A day in the village</h3>
+          <ol class="help-phases">
+            <li><strong>Night</strong> — wolves, seer, and doctor act in secret.</li>
+            <li><strong>Day debate</strong> — everyone speaks in turn. Accuse. Defend.</li>
+            <li><strong>Voting</strong> — pick who to execute. Most votes loses.</li>
+            <li><strong>Resolution</strong> — bodies are revealed, and the cycle begins again.</li>
+          </ol>
+        </section>
+
+        <section class="help-section">
+          <h3>Controls</h3>
+          <ul class="help-controls">
+            <li>Click your <strong>role card</strong> to flip it and read your ability in full.</li>
+            <li>Use the tabs at the bottom on small screens (<strong>Log · Players · Act</strong>).</li>
+            <li>Press <kbd>Esc</kbd>, click the <strong>×</strong>, or tap outside this panel to close.</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>
